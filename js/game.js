@@ -10,7 +10,7 @@ const { Engine, Runner, Bodies, Body, World, Constraint, Events } = Matter;
 // ── CONFIG ─────────────────────────────────────────────────────
 const C = {
   W: 1280, H: 720,
-  ASSETS: 'assets/',
+  ASSETS: '../senaro avurudu/',
   GRAVITY: 2.5,
   GROUND_BASE: 460,
   FINISH_X: 9000,
@@ -82,9 +82,9 @@ class Input {
 // ── CAMERA ─────────────────────────────────────────────────────
 class Camera {
   constructor() { this.x = 0; this.y = 0; }
-  follow(tx, ty) {
-    const gx = tx - C.W * 0.3 - C.CAM_LEAD;
-    const gy = ty - C.H * 0.60;
+  follow(tx, ty, canvasW, canvasH, gameScale) {
+    const gx = tx - (canvasW / gameScale) * 0.3 - C.CAM_LEAD;
+    const gy = ty - (canvasH / gameScale) * 0.60;
     this.x += (gx - this.x) * C.CAM_LERP;
     this.y += (gy - this.y) * C.CAM_LERP;
   }
@@ -189,31 +189,33 @@ class AudioManager {
     if (!loop) src.onended = () => { delete this.nodes[key]; };
   }
 
-  update(bike, input) {
-    if (!this.started || !bike || bike.isCrashed) {
-      if (this.started) this.stopAll();
-      return;
-    }
+  update(bike, input, scene) {
+    if (!this.started || !bike) return;
+
+    // Fade out everything if not in the main game scene (Victory or Death)
+    const inGame = (scene === 'game');
+    const isActive = (inGame && !bike.isCrashed);
     
     if (this._smoothSpeed === undefined) this._smoothSpeed = 0;
     this._smoothSpeed += (bike.speed - this._smoothSpeed) * 0.15;
     
     const speedRatio = Math.min(1, this._smoothSpeed / 13);
-    const accelerating = input.fwd;
-    const braking = input.bwd && this._smoothSpeed > 1;
+    const accelerating = input.fwd && isActive;
+    const braking = input.bwd && this._smoothSpeed > 1 && isActive;
 
     // Clean crossfade logic: Idle fades out as Riding fades in
     let idleVol = 0, ridingVol = 0;
-    if (accelerating) {
+    if (!isActive) {
+      idleVol = 0; ridingVol = 0;
+    } else if (accelerating) {
       idleVol = 0;
       ridingVol = 0.4 + (speedRatio * 0.6);
     } else {
-      idleVol = Math.max(0, 1.0 - (speedRatio * 1.5)); // Fades out fast as we move
+      idleVol = Math.max(0, 1.0 - (speedRatio * 1.5));
       ridingVol = speedRatio * 0.7;
     }
     
     if (this.useWeb) {
-      // Perfect seamless looping with Web Audio Buffers
       if (this.nodes['idle']) this.nodes['idle'].targetVol = idleVol;
       if (this.nodes['riding']) this.nodes['riding'].targetVol = ridingVol;
       
@@ -226,33 +228,31 @@ class AudioManager {
         const targetPitch = 0.75 + (speedRatio * 0.85);
         if (this._smoothPitch === undefined) this._smoothPitch = targetPitch;
         this._smoothPitch += (targetPitch - this._smoothPitch) * 0.12;
-        
         if (Math.abs(rNode.src.playbackRate.value - this._smoothPitch) > 0.001) {
           rNode.src.playbackRate.value = this._smoothPitch;
         }
       }
-      
       this._blendWeb();
     } else {
       // HTML Audio fallback
-      this.htmlSnds['idle'].targetVol = idleVol;
-      this.htmlSnds['riding'].targetVol = ridingVol;
+      if (this.htmlSnds['idle']) this.htmlSnds['idle'].targetVol = idleVol;
+      if (this.htmlSnds['riding']) this.htmlSnds['riding'].targetVol = ridingVol;
       
-      if (braking && this.htmlSnds['brake'].audio.paused && this._smoothSpeed > 3) {
+      if (braking && this.htmlSnds['brake'] && this.htmlSnds['brake'].audio.paused && this._smoothSpeed > 3) {
         this.htmlSnds['brake'].audio.currentTime = 0;
         this.htmlSnds['brake'].audio.volume = 0.8;
         this.htmlSnds['brake'].audio.play().catch(()=>{});
       }
-      this._blendHTML(this.htmlSnds['idle']);
-      this._blendHTML(this.htmlSnds['riding']);
+      if (this.htmlSnds['idle']) this._blendHTML(this.htmlSnds['idle']);
+      if (this.htmlSnds['riding']) this._blendHTML(this.htmlSnds['riding']);
       
-      const rAudio = this.htmlSnds['riding'].audio;
-      if (rAudio && rAudio.playbackRate !== undefined && ridingVol > 0.05) {
+      const rSnd = this.htmlSnds['riding'];
+      if (rSnd && rSnd.audio && rSnd.audio.playbackRate !== undefined && ridingVol > 0.05) {
         const targetPitch = 0.8 + (speedRatio * 0.8);
         if (this._smoothPitch === undefined) this._smoothPitch = targetPitch;
         this._smoothPitch += (targetPitch - this._smoothPitch) * 0.1;
-        if (Math.abs(rAudio.playbackRate - this._smoothPitch) > 0.01) {
-          rAudio.playbackRate = this._smoothPitch;
+        if (Math.abs(rSnd.audio.playbackRate - this._smoothPitch) > 0.01) {
+          rSnd.audio.playbackRate = this._smoothPitch;
         }
       }
     }
@@ -679,10 +679,13 @@ class Environment {
     this.props.sort((a, b) => a.z - b.z); // Pre-sort for rendering performance
   }
   update(bikeX) { this.sunRot += 0.005; }
-  draw(ctx, am, cam) {
+  draw(ctx, am, cam, canvasW, canvasH, gameScale) {
+    const vW = canvasW / gameScale;
+    const vH = canvasH / gameScale;
+    
     // 1. Draw Highly Realistic Sun
     const sunX = 250 - cam.x * 0.015;
-    const sunY = C.H * 0.35;
+    const sunY = vH * 0.35;
     this.sunRot += 0.003;
 
     ctx.save();
@@ -767,15 +770,18 @@ class Environment {
     });
     ctx.globalAlpha = 1.0;
   }
-  drawBG(ctx, cam) {
+  drawBG(ctx, cam, canvasW, canvasH, gameScale) {
+    const vW = canvasW / gameScale;
+    const vH = canvasH / gameScale;
+    
     // 1. Base Sky Gradient
-    const sky = ctx.createLinearGradient(0, 0, 0, C.H);
+    const sky = ctx.createLinearGradient(0, 0, 0, vH);
     sky.addColorStop(0, '#0a0d26');     // Deep night blue at top
     sky.addColorStop(0.35, '#2b1b4d');  // Purple
     sky.addColorStop(0.65, '#993a41');  // Fiery reddish pink
     sky.addColorStop(0.85, '#d47324');  // Bright orange
     sky.addColorStop(1, '#ffb44a');     // Golden horizon
-    ctx.fillStyle = sky; ctx.fillRect(0, 0, C.W, C.H);
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, vW, vH);
 
     // 2. Procedural Clouds (Soft overlapping ellipses)
     ctx.save();
@@ -785,8 +791,8 @@ class Environment {
     ctx.fillStyle = '#1e1438'; // Dark purple silhouette clouds
     for(let i=0; i<15; i++) {
         ctx.beginPath();
-        ctx.ellipse(cx1 + i*160 - 100, C.H * 0.45 + Math.sin(i)*40, 140, 35, 0, 0, Math.PI*2);
-        ctx.ellipse(cx1 + i*160 + 1500 - 100, C.H * 0.45 + Math.sin(i)*40, 140, 35, 0, 0, Math.PI*2);
+        ctx.ellipse(cx1 + i*160 - 100, vH * 0.45 + Math.sin(i)*40, 140, 35, 0, 0, Math.PI*2);
+        ctx.ellipse(cx1 + i*160 + 1500 - 100, vH * 0.45 + Math.sin(i)*40, 140, 35, 0, 0, Math.PI*2);
         ctx.fill();
     }
     // Layer 2 - Mid clouds (catches the light)
@@ -795,48 +801,48 @@ class Environment {
     ctx.fillStyle = '#c95b45'; // Orange-pinkish clouds
     for(let i=0; i<10; i++) {
         ctx.beginPath();
-        ctx.ellipse(cx2 + i*220, C.H * 0.6 + Math.cos(i)*30, 180, 45, 0, 0, Math.PI*2);
-        ctx.ellipse(cx2 + i*220 + 1500, C.H * 0.6 + Math.cos(i)*30, 180, 45, 0, 0, Math.PI*2);
+        ctx.ellipse(cx2 + i*220, vH * 0.6 + Math.cos(i)*30, 180, 45, 0, 0, Math.PI*2);
+        ctx.ellipse(cx2 + i*220 + 1500, vH * 0.6 + Math.cos(i)*30, 180, 45, 0, 0, Math.PI*2);
         ctx.fill();
     }
     // Layer 3 - Bright lower clouds
     ctx.globalAlpha = 0.6;
     const cx3 = -(cam.x * 0.035) % 1500;
-    const cloudGrad = ctx.createLinearGradient(0, C.H*0.7, 0, C.H*0.85);
+    const cloudGrad = ctx.createLinearGradient(0, vH*0.7, 0, vH*0.85);
     cloudGrad.addColorStop(0, '#fca23a');
     cloudGrad.addColorStop(1, '#ffce63');
     ctx.fillStyle = cloudGrad;
     for(let i=0; i<8; i++) {
         ctx.beginPath();
-        ctx.ellipse(cx3 + i*300 + 50, C.H * 0.75 + Math.sin(i*2)*20, 220, 50, 0, 0, Math.PI*2);
-        ctx.ellipse(cx3 + i*300 + 1550, C.H * 0.75 + Math.sin(i*2)*20, 220, 50, 0, 0, Math.PI*2);
+        ctx.ellipse(cx3 + i*300 + 50, vH * 0.75 + Math.sin(i*2)*20, 220, 50, 0, 0, Math.PI*2);
+        ctx.ellipse(cx3 + i*300 + 1550, vH * 0.75 + Math.sin(i*2)*20, 220, 50, 0, 0, Math.PI*2);
         ctx.fill();
     }
     ctx.restore();
     
     // Ambient floating particles
-    this.drawAmbient(ctx, cam);
+    this.drawAmbient(ctx, cam, vW, vH);
 
     // ── Mountains with Atmospheric perspective ──
     const mx = -cam.x * .1;
     ctx.fillStyle = 'rgba(35, 20, 60, 0.6)'; // Deep purple mountains
-    this._mtns(ctx, mx, C.H * .52, C.H * .32, 7, 1234);
+    this._mtns(ctx, mx, vH * .52, vH * .32, 7, 1234, vW);
     
     ctx.fillStyle = 'rgba(90, 30, 60, 0.55)'; // Dark reddish-purple hills
-    this._mtns(ctx, mx * 1.4 + 100, C.H * .60, C.H * .25, 5, 5678);
+    this._mtns(ctx, mx * 1.4 + 100, vH * .60, vH * .25, 5, 5678, vW);
     
     const hx = -cam.x * .25;
     ctx.fillStyle = 'rgba(70, 45, 30, 0.8)'; // Brownish close hills silhouette
-    ctx.beginPath(); ctx.moveTo(0, C.H * .73);
-    for (let x = 0; x <= C.W; x += 8) { ctx.lineTo(x, C.H * .73 - Math.sin((x + hx) * .055) * 38 - 28); }
-    ctx.lineTo(C.W, C.H); ctx.lineTo(0, C.H); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, vH * .73);
+    for (let x = 0; x <= vW; x += 8) { ctx.lineTo(x, vH * .73 - Math.sin((x + hx) * .055) * 38 - 28); }
+    ctx.lineTo(vW, vH); ctx.lineTo(0, vH); ctx.closePath(); ctx.fill();
     
     const tx = -cam.x * .4;
     ctx.fillStyle = 'rgba(30, 15, 20, 0.95)'; // Almost black forefront hills/trees
     for (let i = 0; i < 20; i++) {
-      const x2 = ((i * 137 + tx) % (C.W + 200)) - 100, h = 48 + (i * 17) % 40;
-      ctx.beginPath(); ctx.moveTo(x2, C.H * .72);
-      ctx.lineTo(x2 - 20, C.H * .72 - h); ctx.lineTo(x2 + 20, C.H * .72 - h); ctx.closePath(); ctx.fill();
+      const x2 = ((i * 137 + tx) % (vW + 200)) - 100, h = 48 + (i * 17) % 40;
+      ctx.beginPath(); ctx.moveTo(x2, vH * .72);
+      ctx.lineTo(x2 - 20, vH * .72 - h); ctx.lineTo(x2 + 20, vH * .72 - h); ctx.closePath(); ctx.fill();
     }
   }
   _mtns(ctx, ox, by, mh, n, seed) {
@@ -874,7 +880,7 @@ class Environment {
 }
 
 // ── HUD ────────────────────────────────────────────────────────
-function drawHUD(ctx, dist, elapsed, speed) {
+function drawHUD(ctx, dist, elapsed, speed, vW, vH) {
   const pad = 18;
   const rr = (x, y, w, h, r, fill, border) => {
     ctx.fillStyle = fill; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
@@ -894,23 +900,23 @@ function drawHUD(ctx, dist, elapsed, speed) {
   rr(pad, pad + 104, 190, 44, 12, glassPanel, border);
   ctx.fillStyle = '#4dffaa'; ctx.fillText(`⚡ ${(speed * 3.6) | 0} km/h`, pad + 16, pad + 133);
 
-  const goal = Math.max(0, (C.FINISH_X - (dist + 150)) | 0);
-  rr(C.W - 220, pad, 200, 46, 12, glassPanel, border);
+  const goal = Math.max(0, (C.FINISH_X - (dist + 700)) | 0);
+  rr(vW - 220, pad, 200, 46, 12, glassPanel, border);
   ctx.fillStyle = '#FFD700'; ctx.font = '800 17px Outfit';
-  ctx.fillText(`🏁 ${goal} m to goal`, C.W - 204, pad + 29);
+  ctx.fillText(`🏁 ${goal} m to goal`, vW - 204, pad + 29);
 }
 
 // ── SCENES ────────────────────────────────────────────────────
 class MenuScene {
   constructor(game) { this.game = game; this.t = 0; this.hover = null; this._btns = {}; }
-  draw(ctx, am) {
-    this.t += .016;
-    const sky = ctx.createLinearGradient(0, 0, 0, C.H);
+  draw(ctx, vW, vH) {
+    this._btns = {}; this.t += .016;
+    const sky = ctx.createLinearGradient(0, 0, 0, vH);
     sky.addColorStop(0, '#0d0344'); sky.addColorStop(.5, '#c2440e'); sky.addColorStop(1, '#f5a623');
-    ctx.fillStyle = sky; ctx.fillRect(0, 0, C.W, C.H);
-    ctx.fillStyle = '#3a7a48'; ctx.fillRect(0, C.H * .76, C.W, C.H * .24);
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, vW, vH);
+    ctx.fillStyle = '#3a7a48'; ctx.fillRect(0, vH * .76, vW, vH * .24);
 
-    const sx = C.W * .82, sy = C.H * .22, sr = 68 + Math.sin(this.t * .8) * 8;
+    const sx = vW * .82, sy = vH * .22, sr = 68 + Math.sin(this.t * .8) * 8;
     const sg = ctx.createRadialGradient(sx, sy, 10, sx, sy, sr);
     sg.addColorStop(0, '#fff7a0'); sg.addColorStop(.6, '#FFD700'); sg.addColorStop(1, 'rgba(255,120,0,0)');
     ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(sx, sy, sr + 20, 0, Math.PI * 2); ctx.fill();
@@ -921,27 +927,27 @@ class MenuScene {
     }
     ctx.restore();
 
-    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.beginPath(); ctx.roundRect(C.W * .5 - 310, 75, 620, 135, 22); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.beginPath(); ctx.roundRect(vW * .5 - 310, 75, 620, 135, 22); ctx.fill();
     ctx.font = '900 52px Outfit'; ctx.textAlign = 'center';
     const tg = ctx.createLinearGradient(0, 75, 0, 210); tg.addColorStop(0, '#FFD700'); tg.addColorStop(1, '#FF4500');
-    ctx.fillStyle = tg; ctx.fillText('🏍 Senaro Avurudu Ride', C.W * .5, 148);
+    ctx.fillStyle = tg; ctx.fillText('🏍 Senaro Avurudu Ride', vW * .5, 148);
     ctx.font = '700 22px Outfit'; ctx.fillStyle = '#ffe0a0';
-    ctx.fillText('Avurudu Challenge — Race through the village!', C.W * .5, 186);
+    ctx.fillText('Avurudu Challenge — Race through the village!', vW * .5, 186);
 
-    this._btn(ctx, C.W * .5, 295, 'Start Game 🚀', 'start');
-    this._btn(ctx, C.W * .5, 375, 'How to Play 📖', 'help');
+    this._btn(ctx, vW * .5, 315, 'Start Game 🚀', 'start');
+    this._btn(ctx, vW * .5, 395, 'How to Play 📖', 'help');
 
     if (this.hover === 'help') {
-      ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.beginPath(); ctx.roundRect(C.W * .5 - 270, 418, 540, 170, 16); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.beginPath(); ctx.roundRect(vW * .5 - 270, 438, 540, 170, 16); ctx.fill();
       ctx.font = '700 17px Outfit'; ctx.textAlign = 'center'; ctx.fillStyle = '#FFD700';
-      ctx.fillText('🎮 Controls', C.W * .5, 446);
+      ctx.fillText('🎮 Controls', vW * .5, 466);
       ctx.fillStyle = '#eee'; ctx.font = '15px Outfit';
       ['→ Right Arrow / D  →  Accelerate', '← Left Arrow / A  →  Brake / Reverse',
         '↑↓ Arrows / W S  →  Lean forward/back', 'Reach the Senaro Building to win! 🏁'
-      ].forEach((t, i) => ctx.fillText(t, C.W * .5, 472 + i * 24));
+      ].forEach((t, i) => ctx.fillText(t, vW * .5, 492 + i * 24));
     }
     ctx.font = '13px Outfit'; ctx.fillStyle = 'rgba(255,255,255,.4)';
-    ctx.fillText('Sinhala New Year · Senaro GN Area', C.W * .5, C.H - 16);
+    ctx.fillText('Sinhala New Year · Senaro GN Area', vW * .5, vH - 24);
     ctx.textAlign = 'left';
   }
   _btn(ctx, x, y, label, id) {
@@ -972,77 +978,77 @@ class MenuScene {
 
 class LoadingScene {
   constructor() { this.a = 0; }
-  draw(ctx, p) {
+  draw(ctx, p, vW, vH) {
     this.a += .08;
-    ctx.fillStyle = '#0d0344'; ctx.fillRect(0, 0, C.W, C.H);
-    ctx.save(); ctx.translate(C.W * .5, C.H * .38); ctx.rotate(this.a);
+    ctx.fillStyle = '#0d0344'; ctx.fillRect(0, 0, vW, vH);
+    ctx.save(); ctx.translate(vW * .5, vH * .38); ctx.rotate(this.a);
     for (let i = 0; i < 8; i++) {
       ctx.fillStyle = `rgba(255,200,0,${.2 + i / 8 * .8})`; ctx.beginPath();
       ctx.arc(34 * Math.cos(i * Math.PI / 4), 34 * Math.sin(i * Math.PI / 4), 10, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
     ctx.font = '900 34px Outfit'; ctx.textAlign = 'center'; ctx.fillStyle = '#FFD700';
-    ctx.fillText('🏍 Loading Avurudu Ride…', C.W * .5, C.H * .56);
-    const bw = 400, bh = 18, bx = C.W * .5 - bw / 2, by = C.H * .65;
+    ctx.fillText('🏍 Loading Avurudu Ride…', vW * .5, vH * .56);
+    const bw = 400, bh = 18, bx = vW * .5 - bw / 2, by = vH * .65;
     ctx.fillStyle = 'rgba(255,255,255,.15)'; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 9); ctx.fill();
     const grd = ctx.createLinearGradient(bx, 0, bx + bw, 0);
     grd.addColorStop(0, '#FF4500'); grd.addColorStop(1, '#FFD700');
     ctx.fillStyle = grd; ctx.beginPath(); ctx.roundRect(bx, by, bw * p, bh, 9); ctx.fill();
-    ctx.font = '700 17px Outfit'; ctx.fillStyle = '#eee'; ctx.fillText(`${Math.round(p * 100)}%`, C.W * .5, by + 40);
+    ctx.font = '700 17px Outfit'; ctx.fillStyle = '#eee'; ctx.fillText(`${Math.round(p * 100)}%`, vW * .5, by + 40);
     ctx.textAlign = 'left';
   }
 }
 
 class GameOverScene {
   constructor(game) { this.game = game; this.t = 0; }
-  draw(ctx, elapsed, dist) {
+  draw(ctx, elapsed, dist, vW, vH) {
     this.t += .016;
-    ctx.fillStyle = 'rgba(10,0,20,.8)'; ctx.fillRect(0, 0, C.W, C.H);
+    ctx.fillStyle = 'rgba(10,0,20,.8)'; ctx.fillRect(0, 0, vW, vH);
     ctx.save(); ctx.textAlign = 'center';
     const sc = 1 + Math.sin(this.t * 3) * .04;
-    ctx.translate(C.W * .5, C.H * .35); ctx.scale(sc, sc);
+    ctx.translate(vW * .5, vH * .35); ctx.scale(sc, sc);
     ctx.font = '900 62px Outfit'; ctx.fillStyle = '#FF4500'; ctx.fillText('💥 Crashed!', 0, 0); ctx.restore();
     ctx.textAlign = 'center'; ctx.font = '700 24px Outfit'; ctx.fillStyle = '#eee';
-    ctx.fillText(`Distance: ${Math.max(0, dist) | 0} m`, C.W * .5, C.H * .52);
+    ctx.fillText(`Distance: ${Math.max(0, dist) | 0} m`, vW * .5, vH * .52);
     const mm = Math.floor(elapsed / 60) | 0, ss = Math.floor(elapsed % 60) | 0;
-    ctx.fillText(`Time: ${mm}:${ss.toString().padStart(2, '0')}`, C.W * .5, C.H * .58);
-    this._btn(ctx); ctx.textAlign = 'left';
+    ctx.fillText(`Time: ${mm}:${ss.toString().padStart(2, '0')}`, vW * .5, vH * .58);
+    this._btn(ctx, vW, vH); ctx.textAlign = 'left';
   }
-  _btn(ctx) {
-    const bw = 240, bh = 54, bx = C.W * .5 - 120, by = C.H * .68;
+  _btn(ctx, vW, vH) {
+    const bw = 240, bh = 54, bx = vW * .5 - 120, by = vH * .68;
     ctx.fillStyle = 'rgba(255,80,0,.85)'; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 27); ctx.fill();
     ctx.strokeStyle = '#FFD700'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 27); ctx.stroke();
     ctx.font = '700 22px Outfit'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-    ctx.fillText('🔄 Try Again', C.W * .5, by + 34); this._rb = { bx, by, bw, bh };
+    ctx.fillText('🔄 Try Again', vW * .5, by + 34); this._rb = { bx, by, bw, bh };
   }
   click(mx, my) { if (this._rb && mx >= this._rb.bx && mx <= this._rb.bx + this._rb.bw && my >= this._rb.by && my <= this._rb.by + this._rb.bh) this.game.switchScene('game'); }
 }
 
 class WinScene {
   constructor(game) { this.game = game; this.t = 0; }
-  draw(ctx, elapsed, dist) {
+  draw(ctx, elapsed, dist, vW, vH) {
     this.t += .016;
-    ctx.fillStyle = `rgba(5,20,5,${Math.min(1, this.t * 1.8) * .75})`; ctx.fillRect(0, 0, C.W, C.H);
+    ctx.fillStyle = `rgba(5,20,5,${Math.min(1, this.t * 1.8) * .75})`; ctx.fillRect(0, 0, vW, vH);
     ctx.save(); ctx.textAlign = 'center';
     const sc = 1 + Math.sin(this.t * 2.5) * .05;
-    ctx.translate(C.W * .5, C.H * .28); ctx.scale(sc, sc); ctx.font = '900 58px Outfit';
+    ctx.translate(vW * .5, vH * .28); ctx.scale(sc, sc); ctx.font = '900 58px Outfit';
     const g = ctx.createLinearGradient(-200, 0, 200, 0);
     g.addColorStop(0, '#FFD700'); g.addColorStop(.5, '#fff'); g.addColorStop(1, '#FFD700');
     ctx.fillStyle = g; ctx.fillText('🎉 Avurudu Victory!', 0, 0); ctx.restore();
     ctx.textAlign = 'center'; ctx.font = '700 26px Outfit'; ctx.fillStyle = '#a0ffa0';
-    ctx.fillText('You reached the Senaro Building! 🏢', C.W * .5, C.H * .43);
+    ctx.fillText('You reached the Senaro Building! 🏢', vW * .5, vH * .43);
     const mm = Math.floor(elapsed / 60) | 0, ss = Math.floor(elapsed % 60) | 0;
     ctx.font = '700 22px Outfit'; ctx.fillStyle = '#eee';
-    ctx.fillText(`⏱ ${mm}:${ss.toString().padStart(2, '0')}  📍 ${Math.max(0, dist) | 0} m`, C.W * .5, C.H * .52);
-    this._btn(ctx); ctx.textAlign = 'left';
+    ctx.fillText(`⏱ ${mm}:${ss.toString().padStart(2, '0')}  📍 ${Math.max(0, dist) | 0} m`, vW * .5, vH * .52);
+    this._btn(ctx, vW, vH); ctx.textAlign = 'left';
   }
-  _btn(ctx) {
-    const bw = 250, bh = 54, bx = C.W * .5 - 125, by = C.H * .65;
+  _btn(ctx, vW, vH) {
+    const bw = 250, bh = 54, bx = vW * .5 - 125, by = vH * .65;
     const g = ctx.createLinearGradient(bx, 0, bx + bw, 0); g.addColorStop(0, '#FF4500'); g.addColorStop(1, '#FFD700');
     ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 27); ctx.fill();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 27); ctx.stroke();
     ctx.font = '700 22px Outfit'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-    ctx.fillText('🔄 Play Again', C.W * .5, by + 34); this._pb = { bx, by, bw, bh };
+    ctx.fillText('🔄 Play Again', vW * .5, by + 34); this._pb = { bx, by, bw, bh };
   }
   click(mx, my) { if (this._pb && mx >= this._pb.bx && mx <= this._pb.bx + this._pb.bw && my >= this._pb.by && my <= this._pb.by + this._pb.bh) this.game.switchScene('game'); }
 }
@@ -1064,9 +1070,14 @@ class Game {
     });
   }
   _resize() {
-    const r = C.W / C.H, ww = window.innerWidth, wh = window.innerHeight;
-    if (ww / wh > r) { this.canvas.height = wh; this.canvas.width = wh * r; this.scale = wh / C.H; }
-    else { this.canvas.width = ww; this.canvas.height = ww / r; this.scale = ww / C.W; }
+    const ww = window.innerWidth, wh = window.innerHeight;
+    this.canvas.width = ww;
+    this.canvas.height = wh;
+    // We want the game to look consistent, so we scale based on width,
+    // but the actual visible height can vary (portrait vs landscape)
+    this.scale = ww / 1280;
+    // In very wide screens, don't let it get TOO high
+    if (this.scale > wh / 720) this.scale = wh / 720;
   }
   _tw(ex, ey) { const r = this.canvas.getBoundingClientRect(); return { x: (ex - r.left) / this.scale, y: (ey - r.top) / this.scale }; }
   _click(e) {
@@ -1120,26 +1131,29 @@ class Game {
   _loop() {
     requestAnimationFrame(() => this._loop());
     const ctx = this.ctx;
+    const vW = this.canvas.width / this.scale;
+    const vH = this.canvas.height / this.scale;
+
     ctx.save(); ctx.scale(this.scale, this.scale);
     if (this.scene === 'loading') {
-      this.loadScene.draw(ctx, this.am.progress);
+      this.loadScene.draw(ctx, this.am.progress, vW, vH);
     } else if (this.scene === 'menu') {
-      this.menuScene.draw(ctx, this.am);
+      this.menuScene.draw(ctx, vW, vH);
     } else if (this.scene === 'game') {
-      this._updateGame(); this._drawGame(ctx);
+      this._updateGame(); this._drawGame(ctx, vW, vH);
     } else if (this.scene === 'gameover') {
-      this._drawGame(ctx);
-      this.goScene.draw(ctx, this.elapsed, this.bike ? this.bike.pos.x - 200 : 0);
+      this._drawGame(ctx, vW, vH);
+      this.goScene.draw(ctx, this.elapsed, this.bike ? this.bike.pos.x - 700 : 0, vW, vH);
     } else if (this.scene === 'win') {
-      this._drawGame(ctx);
-      this.winScene.draw(ctx, this.elapsed, this.bike ? this.bike.pos.x - 200 : 0);
-      if (this.confettiT-- <= 0) { this.parts.confetti(C.W * .5, C.H * .4); this.confettiT = 16; }
+      this._drawGame(ctx, vW, vH);
+      this.winScene.draw(ctx, this.elapsed, this.bike ? this.bike.pos.x - 700 : 0, vW, vH);
+      if (this.confettiT-- <= 0) { this.parts.confetti(vW * .5, vH * .4); this.confettiT = 16; }
       this.parts.update();
     }
     
     // Global Audio Update: Continues to process fades even after scene changes
     if (this.audio && this.scene !== 'loading') {
-      this.audio.update(this.bike, this.input);
+      this.audio.update(this.bike, this.input, this.scene);
     }
     
     ctx.restore();
@@ -1148,7 +1162,7 @@ class Game {
     if (!this.bike) return;
     this.elapsed += 1 / 60;
     this.bike.update(this.input);
-    this.cam.follow(this.bike.pos.x, this.bike.pos.y);
+    this.cam.follow(this.bike.pos.x, this.bike.pos.y, this.canvas.width, this.canvas.height, this.scale);
     // Dust
     if (this.input.fwd && this.bike.speed > 1) {
       if (this.dustT-- <= 0) {
@@ -1172,10 +1186,10 @@ class Game {
         this.goScene = new GameOverScene(this); this.scene = 'gameover'; 
     }
   }
-  _drawGame(ctx) {
+  _drawGame(ctx, vW, vH) {
     if (!this.env || !this.terrain || !this.bike) return;
-    this.env.drawBG(ctx, this.cam);
-    this.env.draw(ctx, this.am, this.cam);
+    this.env.drawBG(ctx, this.cam, this.canvas.width, this.canvas.height, this.scale);
+    this.env.draw(ctx, this.am, this.cam, this.canvas.width, this.canvas.height, this.scale);
     ctx.save(); ctx.translate(-this.cam.x, -this.cam.y);
     this.terrain.draw(ctx, this.am);
     this.bike.draw(ctx, this.am);
@@ -1193,13 +1207,13 @@ class Game {
     }
 
     // Cinematic Vignette Overlay
-    const grad = ctx.createRadialGradient(C.W/2, C.H/2, C.H * 0.25, C.W/2, C.H/2, C.H);
+    const grad = ctx.createRadialGradient(vW/2, vH/2, vH * 0.25, vW/2, vH/2, vH);
     grad.addColorStop(0, 'rgba(0,0,0,0)');
     grad.addColorStop(1, 'rgba(15,5,30,0.65)');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, C.W, C.H);
+    ctx.fillRect(0, 0, vW, vH);
 
-    drawHUD(ctx, this.bike.pos.x - 200, this.elapsed, this.bike.speed);
+    drawHUD(ctx, this.bike.pos.x - 700, this.elapsed, this.bike.speed, vW, vH);
   }
 }
 
