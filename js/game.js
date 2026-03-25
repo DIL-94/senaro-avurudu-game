@@ -10,7 +10,7 @@ const { Engine, Runner, Bodies, Body, World, Constraint, Events } = Matter;
 // ── CONFIG ─────────────────────────────────────────────────────
 const C = {
   W: 1280, H: 720,
-  ASSETS: '../senaro avurudu/',
+  ASSETS: 'assets/',
   GRAVITY: 2.5,
   GROUND_BASE: 460,
   FINISH_X: 9000,
@@ -24,18 +24,18 @@ const C = {
 
 // ── ASSETS ─────────────────────────────────────────────────────
 const ASSET_MAP = {
-  bikeBody: 'bike/SVG/body.svg', frontTyre: 'bike/SVG/front tyre.svg',
-  backTyre: 'bike/SVG/back tyre.svg', rider: 'RIDER.png',
-  tree1: 'TREE (1).png', tree2: 'TREE (2).png', tree3: 'TREE (3).png',
-  cave: 'cave with trees.png', hotel: 'hotel.png', house: 'house 3.png',
-  senaro: 'senaro building.png', sunInner: 'sun- inner.png', sunOuter: 'sun-outer .png',
-  roadFlat: 'road/Flat Road.png', roadUp: 'road/Uphill Ramp.png',
-  roadDown: 'road/Downhill Ramp.png', roadBump: 'road/Rounded Bump.png',
-  fence: 'Fence.png', colorLight: 'color light.png', gasStation: 'gas sation.png',
-  greenHill: 'green hill.png', hill2: 'hill 2.png', hill: 'hill.png',
+  bikeBody: 'bike/SVG/body.svg', frontTyre: 'bike/SVG/front%20tyre.svg',
+  backTyre: 'bike/SVG/back%20tyre.svg', rider: 'RIDER.png',
+  tree1: 'TREE%20(1).png', tree2: 'TREE%20(2).png', tree3: 'TREE%20(3).png',
+  cave: 'cave%20with%20trees.png', hotel: 'hotel.png', house: 'house%203.png',
+  senaro: 'senaro%20building.png', sunInner: 'sun-%20inner.png', sunOuter: 'sun-outer%20.png',
+  roadFlat: 'road/Flat%20Road.png', roadUp: 'road/Uphill%20Ramp.png',
+  roadDown: 'road/Downhill%20Ramp.png', roadBump: 'road/Rounded%20Bump.png',
+  fence: 'Fence.png', colorLight: 'color%20light.png', gasStation: 'gas%20sation.png',
+  greenHill: 'green%20hill.png', hill2: 'hill%202.png', hill: 'hill.png',
   kandy: 'kandy.png', sigiriya: 'sigiriya.png',
-  treeW1: 'tree w (1).png', treeW2: 'tree w (2).png',
-  waterFall2: 'water fall 2.png', waterFall: 'water fall.png',
+  treeW1: 'tree%20w%20(1).png', treeW2: 'tree%20w%20(2).png',
+  waterFall2: 'water%20fall%202.png', waterFall: 'water%20fall.png',
 };
 class AM {
   constructor() { this.imgs = {}; this.loaded = 0; this.total = 0; }
@@ -99,10 +99,10 @@ class Camera {
 class AudioManager {
   constructor() {
     this.files = {
-      'start': 'Bike sound/start and idel.wav',
-      'idle':  'Bike sound/idle not riding.wav',
-      'riding': 'Bike sound/riding.wav',
-      'brake': 'Bike sound/brake.wav'
+      'start': 'Bike%20sound/start%20and%20idel.wav',
+      'idle':  'Bike%20sound/idle%20not%20riding.wav',
+      'riding': 'Bike%20sound/riding.wav',
+      'brake': 'Bike%20sound/brake.wav'
     };
     
     this.useWeb = false;
