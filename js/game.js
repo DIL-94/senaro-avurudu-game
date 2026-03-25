@@ -83,8 +83,10 @@ class Input {
 class Camera {
   constructor() { this.x = 0; this.y = 0; }
   follow(tx, ty, canvasW, canvasH, gameScale) {
-    const gx = tx - (canvasW / gameScale) * 0.3 - C.CAM_LEAD;
-    const gy = ty - (canvasH / gameScale) * 0.60;
+    const vW = canvasW / gameScale, vH = canvasH / gameScale;
+    const horizontalMargin = (vW < vH) ? vW * 0.45 : vW * 0.35 + C.CAM_LEAD;
+    const gx = tx - horizontalMargin;
+    const gy = ty - vH * 0.60;
     this.x += (gx - this.x) * C.CAM_LERP;
     this.y += (gy - this.y) * C.CAM_LERP;
   }
@@ -1073,11 +1075,14 @@ class Game {
     const ww = window.innerWidth, wh = window.innerHeight;
     this.canvas.width = ww;
     this.canvas.height = wh;
-    // We want the game to look consistent, so we scale based on width,
-    // but the actual visible height can vary (portrait vs landscape)
-    this.scale = ww / 1280;
-    // In very wide screens, don't let it get TOO high
-    if (this.scale > wh / 720) this.scale = wh / 720;
+    
+    // Zoom in on portrait (narrow screens)
+    if (ww < wh) {
+      this.scale = ww / 750;
+    } else {
+      this.scale = ww / 1280;
+      if (this.scale > wh / 720) this.scale = wh / 720;
+    }
   }
   _tw(ex, ey) { const r = this.canvas.getBoundingClientRect(); return { x: (ex - r.left) / this.scale, y: (ey - r.top) / this.scale }; }
   _click(e) {
