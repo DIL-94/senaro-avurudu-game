@@ -84,9 +84,12 @@ class Camera {
   constructor() { this.x = 0; this.y = 0; }
   follow(tx, ty, canvasW, canvasH, gameScale) {
     const vW = canvasW / gameScale, vH = canvasH / gameScale;
+    // Tighter horizontal centering for portrait
     const horizontalMargin = (vW < vH) ? vW * 0.45 : vW * 0.35 + C.CAM_LEAD;
     const gx = tx - horizontalMargin;
-    const gy = ty - vH * 0.60;
+    // Lower vertical center to show more ground/obstacles ahead on tall screens
+    const verticalMargin = (vW < vH) ? vH * 0.62 : vH * 0.60;
+    const gy = ty - verticalMargin;
     this.x += (gx - this.x) * C.CAM_LERP;
     this.y += (gy - this.y) * C.CAM_LERP;
   }
@@ -1078,7 +1081,7 @@ class Game {
     
     // Zoom in on portrait (narrow screens)
     if (ww < wh) {
-      this.scale = ww / 750;
+      this.scale = ww / 650;
     } else {
       this.scale = ww / 1280;
       if (this.scale > wh / 720) this.scale = wh / 720;
@@ -1205,8 +1208,8 @@ class Game {
       ctx.save(); ctx.globalAlpha = Math.min(.3, (this.bike.speed - 4) * .06);
       ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 2;
       for (let i = 0; i < 6; i++) {
-        const ly = 100 + Math.random() * C.H * .75, ll = 30 + Math.random() * 70;
-        ctx.beginPath(); ctx.moveTo(820, ly); ctx.lineTo(820 - ll, ly); ctx.stroke();
+        const ly = Math.random() * vH, ll = 40 + Math.random() * 80;
+        ctx.beginPath(); ctx.moveTo(vW + 50, ly); ctx.lineTo(vW + 50 - ll, ly); ctx.stroke();
       }
       ctx.restore();
     }
